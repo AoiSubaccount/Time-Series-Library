@@ -41,7 +41,7 @@ class Exp_Short_Term_Forecast(Exp_Basic):
         return model_optim
 
     def _select_criterion(self, loss_name='MSE'):
-        if loss_name == 'MSE':
+        if loss_name.upper() == 'MSE':
             return nn.MSELoss()
         elif loss_name == 'MAPE':
             return mape_loss()
@@ -49,6 +49,10 @@ class Exp_Short_Term_Forecast(Exp_Basic):
             return mase_loss()
         elif loss_name == 'SMAPE':
             return smape_loss()
+        elif loss_name.lower() == 'quantile':
+            quantiles = [float(q) for q in self.args.quantiles.split(',')]
+            from utils.losses import QuantileLoss
+            return QuantileLoss(quantiles)
 
     def train(self, setting):
         train_data, train_loader = self._get_data(flag='train')
@@ -88,8 +92,12 @@ class Exp_Short_Term_Forecast(Exp_Basic):
                 outputs = self.model(batch_x, None, dec_inp, None)
 
                 f_dim = -1 if self.args.features == 'MS' else 0
-                outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
+                if outputs.dim() == 4:
+                    outputs = outputs[:, -self.args.pred_len:, f_dim:, :]
+                    batch_y = batch_y[:, -self.args.pred_len:, f_dim:].unsqueeze(-1).to(self.device)
+                else:
+                    outputs = outputs[:, -self.args.pred_len:, f_dim:]
+                    batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
 
                 batch_y_mark = batch_y_mark[:, -self.args.pred_len:, f_dim:].to(self.device)
                 loss_value = criterion(batch_x, self.args.frequency_map, outputs, batch_y, batch_y_mark)
@@ -147,12 +155,17 @@ class Exp_Short_Term_Forecast(Exp_Basic):
                                                                       dec_inp[id_list[i]:id_list[i + 1]],
                                                                       None).detach().cpu()
             f_dim = -1 if self.args.features == 'MS' else 0
-            outputs = outputs[:, -self.args.pred_len:, f_dim:]
+            if outputs.dim() == 4:
+                outputs = outputs[:, -self.args.pred_len:, f_dim:, :]
+                y_tensor = torch.from_numpy(np.array(y)).unsqueeze(-1)
+            else:
+                outputs = outputs[:, -self.args.pred_len:, f_dim:]
+                y_tensor = torch.from_numpy(np.array(y))
             pred = outputs
-            true = torch.from_numpy(np.array(y))
+            true = y_tensor
             batch_y_mark = torch.ones(true.shape)
 
-            loss = criterion(x.detach().cpu()[:, :, 0], self.args.frequency_map, pred[:, :, 0], true, batch_y_mark)
+            loss = criterion(pred, true)
 
         self.model.train()
         return loss
@@ -190,10 +203,12 @@ class Exp_Short_Term_Forecast(Exp_Basic):
                     print(id_list[i])
 
             f_dim = -1 if self.args.features == 'MS' else 0
-            outputs = outputs[:, -self.args.pred_len:, f_dim:]
-            outputs = outputs.detach().cpu().numpy()
-
-            preds = outputs
+            if outputs.dim() == 4:
+                outputs = outputs[:, -self.args.pred_len:, f_dim:, :]
+                preds = outputs[..., len(self.args.quantiles.split(','))//2].detach().cpu().numpy()
+            else:
+                outputs = outputs[:, -self.args.pred_len:, f_dim:]
+                preds = outputs.detach().cpu().numpy()
             trues = y
             x = x.detach().cpu().numpy()
 
