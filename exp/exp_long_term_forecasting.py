@@ -35,8 +35,12 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         return model_optim
 
     def _select_criterion(self):
-        criterion = nn.MSELoss()
-        return criterion
+        if self.args.loss.lower() == 'quantile':
+            quantiles = [float(q) for q in self.args.quantiles.split(',')]
+            from utils.losses import QuantileLoss
+            return QuantileLoss(quantiles)
+        else:
+            return nn.MSELoss()
  
 
     def vali(self, vali_data, vali_loader, criterion):
@@ -60,8 +64,12 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 else:
                     outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 f_dim = -1 if self.args.features == 'MS' else 0
-                outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
+                if outputs.dim() == 4:
+                    outputs = outputs[:, -self.args.pred_len:, f_dim:, :]
+                    batch_y = batch_y[:, -self.args.pred_len:, f_dim:].unsqueeze(-1).to(self.device)
+                else:
+                    outputs = outputs[:, -self.args.pred_len:, f_dim:]
+                    batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
 
                 pred = outputs.detach().cpu()
                 true = batch_y.detach().cpu()
@@ -117,16 +125,24 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
 
                         f_dim = -1 if self.args.features == 'MS' else 0
-                        outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                        batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
+                        if outputs.dim() == 4:
+                            outputs = outputs[:, -self.args.pred_len:, f_dim:, :]
+                            batch_y = batch_y[:, -self.args.pred_len:, f_dim:].unsqueeze(-1).to(self.device)
+                        else:
+                            outputs = outputs[:, -self.args.pred_len:, f_dim:]
+                            batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
                         loss = criterion(outputs, batch_y)
                         train_loss.append(loss.item())
                 else:
                     outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
 
                     f_dim = -1 if self.args.features == 'MS' else 0
-                    outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                    batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
+                    if outputs.dim() == 4:
+                        outputs = outputs[:, -self.args.pred_len:, f_dim:, :]
+                        batch_y = batch_y[:, -self.args.pred_len:, f_dim:].unsqueeze(-1).to(self.device)
+                    else:
+                        outputs = outputs[:, -self.args.pred_len:, f_dim:]
+                        batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
                     loss = criterion(outputs, batch_y)
                     train_loss.append(loss.item())
 
@@ -197,23 +213,30 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
 
                 f_dim = -1 if self.args.features == 'MS' else 0
-                outputs = outputs[:, -self.args.pred_len:, :]
-                batch_y = batch_y[:, -self.args.pred_len:, :].to(self.device)
-                outputs = outputs.detach().cpu().numpy()
+                if outputs.dim() == 4:
+                    outputs = outputs[:, -self.args.pred_len:, :, :]
+                    batch_y = batch_y[:, -self.args.pred_len:, :].to(self.device)
+                    pred_numpy = outputs[..., len(self.model.quantiles)//2].detach().cpu().numpy()
+                    all_outputs = outputs.detach().cpu().numpy()
+                else:
+                    outputs = outputs[:, -self.args.pred_len:, :]
+                    batch_y = batch_y[:, -self.args.pred_len:, :].to(self.device)
+                    pred_numpy = outputs.detach().cpu().numpy()
+                    all_outputs = pred_numpy
                 batch_y = batch_y.detach().cpu().numpy()
                 if test_data.scale and self.args.inverse:
                     shape = batch_y.shape
-                    if outputs.shape[-1] != batch_y.shape[-1]:
-                        outputs = np.tile(outputs, [1, 1, int(batch_y.shape[-1] / outputs.shape[-1])])
-                    outputs = test_data.inverse_transform(outputs.reshape(shape[0] * shape[1], -1)).reshape(shape)
+                    if pred_numpy.shape[-1] != batch_y.shape[-1]:
+                        pred_numpy = np.tile(pred_numpy, [1, 1, int(batch_y.shape[-1] / pred_numpy.shape[-1])])
+                    pred_numpy = test_data.inverse_transform(pred_numpy.reshape(shape[0] * shape[1], -1)).reshape(shape)
                     batch_y = test_data.inverse_transform(batch_y.reshape(shape[0] * shape[1], -1)).reshape(shape)
 
-                outputs = outputs[:, :, f_dim:]
+                pred_numpy = pred_numpy[:, :, f_dim:]
                 batch_y = batch_y[:, :, f_dim:]
 
-                pred = outputs
+                pred = pred_numpy
                 true = batch_y
-
+                
                 preds.append(pred)
                 trues.append(true)
                 if i % 20 == 0:

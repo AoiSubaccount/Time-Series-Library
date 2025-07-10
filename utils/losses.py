@@ -87,3 +87,19 @@ class mase_loss(nn.Module):
         masep = t.mean(t.abs(insample[:, freq:] - insample[:, :-freq]), dim=1)
         masked_masep_inv = divide_no_nan(mask, masep[:, None])
         return t.mean(t.abs(target - forecast) * masked_masep_inv)
+
+class QuantileLoss(nn.Module):
+    """Pinball loss for multiple quantile predictions."""
+
+    def __init__(self, quantiles):
+        super().__init__()
+        self.quantiles = quantiles
+
+    def forward(self, preds: t.Tensor, target: t.Tensor) -> t.Tensor:
+        # preds: [B, L, D, Q], target: [B, L, D]
+        losses = []
+        for i, q in enumerate(self.quantiles):
+            errors = target - preds[..., i]
+            losses.append(t.max((q - 1) * errors, q * errors))
+        loss = t.mean(t.stack(losses, dim=-1))
+        return loss
