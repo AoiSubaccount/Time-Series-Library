@@ -119,6 +119,16 @@ python run.py --task_name long_term_forecast \
   --state_condition "rpm >= 10"
 ```
 
+For the Mamba-enhanced variant:
+
+```
+python run.py --task_name long_term_forecast \
+  --is_training 1 --model TimesNetRange_Mamba --data csvfolder \
+  --root_path /path/to/csv_folder --target value --seq_len 96 \
+  --label_len 48 --pred_len 96 --state running \
+  --state_condition "rpm >= 10"
+```
+
 To load a folder of SQLite databases, use the `sqlitefolder` dataset via
 `Dataset_SQLiteFolder`. Provide the table name with `--table_name`. Databases
 must contain a `timestamp` column and consistent feature columns across files.
@@ -129,6 +139,16 @@ Example command:
 ```
 python run.py --task_name long_term_forecast \
   --is_training 1 --model TimesNetRange --data sqlitefolder \
+  --root_path /path/to/db_folder --table_name signals --target value \
+  --seq_len 96 --label_len 48 --pred_len 96 --state running \
+  --state_condition "rpm >= 10"
+```
+
+Using TimesNetRange_Mamba instead:
+
+```
+python run.py --task_name long_term_forecast \
+  --is_training 1 --model TimesNetRange_Mamba --data sqlitefolder \
   --root_path /path/to/db_folder --table_name signals --target value \
   --seq_len 96 --label_len 48 --pred_len 96 --state running \
   --state_condition "rpm >= 10"
