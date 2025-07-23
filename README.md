@@ -102,6 +102,23 @@ bash ./scripts/classification/TimesNet.sh
 - Include the newly added model in the `Exp_Basic.model_dict` of  `./exp/exp_basic.py`.
 - Create the corresponding scripts under the folder `./scripts`.
 
+To train with your own folder of CSV files, use the `csvfolder` dataset
+via `Dataset_CSVFolder`. Your files must share the same columns and contain a
+`timestamp` column. Select the desired state with `--state` and provide a
+boolean expression with `--state_condition` to mark running rows. For example,
+`--state running --state_condition "rpm >= 10 & speed > 0"` keeps only rows
+matching that expression.
+
+Example command:
+
+```
+python run.py --task_name long_term_forecast \
+  --is_training 1 --model TimesNetRange --data csvfolder \
+  --root_path /path/to/csv_folder --target value --seq_len 96 \
+  --label_len 48 --pred_len 96 --state running \
+  --state_condition "rpm >= 10"
+```
+
 Note: 
 
 (1) About classification: Since we include all five tasks in a unified code base, the accuracy of each subtask may fluctuate but the average performance can be reproduced (even a bit better). We have provided the reproduced checkpoints [here](https://github.com/thuml/Time-Series-Library/issues/494).
