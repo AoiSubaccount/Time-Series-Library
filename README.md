@@ -134,6 +134,16 @@ python run.py --task_name long_term_forecast \
   --state_condition "rpm >= 10"
 ```
 
+You can also use the hybrid variant `TimesNetRange_Hybrid`, which adds a small
+GRU module to accelerate interval prediction:
+
+```
+python run.py --task_name long_term_forecast \
+  --is_training 1 --model TimesNetRange_Hybrid --data sqlitefolder \
+  --root_path /path/to/db_folder --table_name signals --target value \
+  --seq_len 96 --label_len 48 --pred_len 96
+```
+
 Note: 
 
 (1) About classification: Since we include all five tasks in a unified code base, the accuracy of each subtask may fluctuate but the average performance can be reproduced (even a bit better). We have provided the reproduced checkpoints [here](https://github.com/thuml/Time-Series-Library/issues/494).
