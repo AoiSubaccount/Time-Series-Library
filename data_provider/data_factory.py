@@ -1,4 +1,4 @@
-from data_provider.data_loader import Dataset_ETT_hour, Dataset_ETT_minute, Dataset_Custom, Dataset_CSVFolder, Dataset_M4, PSMSegLoader, \
+from data_provider.data_loader import Dataset_ETT_hour, Dataset_ETT_minute, Dataset_Custom, Dataset_CSVFolder, Dataset_SQLiteFolder, Dataset_M4, PSMSegLoader, \
     MSLSegLoader, SMAPSegLoader, SMDSegLoader, SWATSegLoader, UEAloader
 from data_provider.uea import collate_fn
 from torch.utils.data import DataLoader
@@ -10,6 +10,7 @@ data_dict = {
     'ETTm2': Dataset_ETT_minute,
     'custom': Dataset_Custom,
     'csvfolder': Dataset_CSVFolder,
+    'sqlitefolder': Dataset_SQLiteFolder,
     'm4': Dataset_M4,
     'PSM': PSMSegLoader,
     'MSL': MSLSegLoader,
@@ -66,9 +67,11 @@ def data_provider(args, flag):
         if args.data == 'm4':
             drop_last = False
         extra_kwargs = {}
-        if args.data == 'csvfolder':
+        if args.data == 'csvfolder' or args.data == 'sqlitefolder':
             extra_kwargs.update({'state': args.state,
                                  'state_condition': args.state_condition})
+        if args.data == 'sqlitefolder':
+            extra_kwargs.update({'table_name': args.table_name})
         data_set = Data(
             args = args,
             root_path=args.root_path,

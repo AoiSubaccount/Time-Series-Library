@@ -40,6 +40,8 @@ if __name__ == '__main__':
                         help='working state selection for csvfolder dataset')
     parser.add_argument('--state_condition', type=str, default=None,
                         help='expression to determine running state from columns')
+    parser.add_argument('--table_name', type=str, default=None,
+                        help='table name for sqlitefolder dataset')
     parser.add_argument('--checkpoints', type=str, default='./checkpoints/', help='location of model checkpoints')
 
     # forecasting task
