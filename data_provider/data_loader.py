@@ -307,6 +307,155 @@ class Dataset_Custom(Dataset):
         return self.scaler.inverse_transform(data)
 
 
+class Dataset_CSVFolder(Dataset):
+    """Load a folder of csv files with a timestamp column.
+
+    Parameters
+    ----------
+    state : {'all', 'running', 'standby'}
+        Which rows to keep. Rows are labelled by evaluating ``state_condition``
+        if provided, otherwise ``state_column`` or ``speed_column``.
+    state_condition : str, optional
+        Boolean expression evaluated on each file to identify running rows,
+        e.g. ``"rpm >= 10 & speed > 0"``.
+    """
+
+    def __init__(self, args, root_path, flag='train', size=None,
+                 features='S', target='value', scale=True, timeenc=0, freq='h',
+                 state='all', state_column='state', speed_column='speed',
+                 speed_threshold=0.1, state_condition=None):
+        self.args = args
+        if size is None:
+            self.seq_len = 96
+            self.label_len = 48
+            self.pred_len = 96
+        else:
+            self.seq_len = size[0]
+            self.label_len = size[1]
+            self.pred_len = size[2]
+
+        assert flag in ['train', 'test', 'val']
+        type_map = {'train': 0, 'val': 1, 'test': 2}
+        self.set_type = type_map[flag]
+
+        self.features = features
+        self.target = target
+        self.scale = scale
+        self.timeenc = timeenc
+        self.freq = freq
+
+        self.root_path = root_path
+        self.state = state
+        self.state_column = state_column
+        self.speed_column = speed_column
+        self.speed_threshold = speed_threshold
+        self.state_condition = state_condition
+
+        self.__read_data__()
+
+    def _load_folder(self):
+        files = sorted(glob.glob(os.path.join(self.root_path, '*.csv')))
+        if not files:
+            raise FileNotFoundError(f'No csv files found in {self.root_path}')
+        frames = []
+        for f in files:
+            df = pd.read_csv(f)
+            if 'timestamp' not in df.columns:
+                raise ValueError('timestamp column required in %s' % f)
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            if self.state != 'all':
+                if self.state_condition is not None:
+                    mask = df.eval(self.state_condition)
+                    if self.state == 'running':
+                        df = df[mask]
+                    else:
+                        df = df[~mask]
+                elif self.state_column in df.columns:
+                    if self.state == 'running':
+                        df = df[df[self.state_column] == 1]
+                    else:
+                        df = df[df[self.state_column] == 0]
+                elif self.speed_column in df.columns:
+                    if self.state == 'running':
+                        df = df[df[self.speed_column] > self.speed_threshold]
+                    else:
+                        df = df[df[self.speed_column] <= self.speed_threshold]
+            frames.append(df)
+        data = pd.concat(frames).sort_values('timestamp').reset_index(drop=True)
+        data = data.set_index('timestamp').resample(self.freq).mean().interpolate()
+        data = data.reset_index()
+        return data
+
+    def __read_data__(self):
+        self.scaler = StandardScaler()
+        df_raw = self._load_folder()
+
+        cols = list(df_raw.columns)
+        cols.remove(self.target)
+        cols.remove('timestamp')
+        df_raw = df_raw[['timestamp'] + cols + [self.target]]
+
+        num_train = int(len(df_raw) * 0.7)
+        num_test = int(len(df_raw) * 0.2)
+        num_vali = len(df_raw) - num_train - num_test
+        border1s = [0, num_train - self.seq_len, len(df_raw) - num_test - self.seq_len]
+        border2s = [num_train, num_train + num_vali, len(df_raw)]
+        border1 = border1s[self.set_type]
+        border2 = border2s[self.set_type]
+
+        if self.features in ['M', 'MS']:
+            cols_data = df_raw.columns[1:]
+            df_data = df_raw[cols_data]
+        else:
+            df_data = df_raw[[self.target]]
+
+        if self.scale:
+            train_data = df_data[border1s[0]:border2s[0]]
+            self.scaler.fit(train_data.values)
+            data = self.scaler.transform(df_data.values)
+        else:
+            data = df_data.values
+
+        df_stamp = df_raw[['timestamp']][border1:border2]
+        df_stamp['timestamp'] = pd.to_datetime(df_stamp.timestamp)
+        if self.timeenc == 0:
+            df_stamp['month'] = df_stamp.timestamp.apply(lambda row: row.month, 1)
+            df_stamp['day'] = df_stamp.timestamp.apply(lambda row: row.day, 1)
+            df_stamp['weekday'] = df_stamp.timestamp.apply(lambda row: row.weekday(), 1)
+            df_stamp['hour'] = df_stamp.timestamp.apply(lambda row: row.hour, 1)
+            data_stamp = df_stamp.drop(['timestamp'], 1).values
+        else:
+            data_stamp = time_features(pd.to_datetime(df_stamp['timestamp'].values), freq=self.freq)
+            data_stamp = data_stamp.transpose(1, 0)
+
+        self.data_x = data[border1:border2]
+        self.data_y = data[border1:border2]
+
+        if self.set_type == 0 and self.args.augmentation_ratio > 0:
+            self.data_x, self.data_y, _ = run_augmentation_single(self.data_x, self.data_y, self.args)
+
+        self.data_stamp = data_stamp
+
+    def __getitem__(self, index):
+        s_begin = index
+        s_end = s_begin + self.seq_len
+        r_begin = s_end - self.label_len
+        r_end = r_begin + self.label_len + self.pred_len
+
+        seq_x = self.data_x[s_begin:s_end]
+        seq_y = self.data_y[r_begin:r_end]
+        seq_x_mark = self.data_stamp[s_begin:s_end]
+        seq_y_mark = self.data_stamp[r_begin:r_end]
+
+        return seq_x, seq_y, seq_x_mark, seq_y_mark
+
+    def __len__(self):
+        return len(self.data_x) - self.seq_len - self.pred_len + 1
+
+    def inverse_transform(self, data):
+        return self.scaler.inverse_transform(data)
+
+
 class Dataset_M4(Dataset):
     def __init__(self, args, root_path, flag='pred', size=None,
                  features='S', data_path='ETTh1.csv',
