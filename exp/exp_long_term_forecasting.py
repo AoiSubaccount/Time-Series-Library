@@ -59,16 +59,30 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 else:
                     outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
-                if isinstance(outputs, tuple):
-                    outputs = outputs[0]
-                f_dim = -1 if self.args.features == 'MS' else 0
-                outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
-
-                pred = outputs.detach().cpu()
-                true = batch_y.detach().cpu()
-
-                loss = criterion(pred, true)
+                if self.args.model == 'TimesNetRange':
+                    mean_pred, lower_pred, upper_pred = outputs
+                    f_dim = -1 if self.args.features == 'MS' else 0
+                    batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
+                    y_mean = batch_y.mean(dim=1)
+                    y_lower = batch_y.min(dim=1).values
+                    y_upper = batch_y.max(dim=1).values
+                    loss = (
+                        criterion(mean_pred, y_mean)
+                        + criterion(lower_pred, y_lower)
+                        + criterion(upper_pred, y_upper)
+                    )
+                    loss = loss.detach().cpu()
+                    pred = mean_pred.detach().cpu()
+                    true = y_mean.detach().cpu()
+                else:
+                    if isinstance(outputs, tuple):
+                        outputs = outputs[0]
+                    f_dim = -1 if self.args.features == 'MS' else 0
+                    outputs = outputs[:, -self.args.pred_len:, f_dim:]
+                    batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
+                    pred = outputs.detach().cpu()
+                    true = batch_y.detach().cpu()
+                    loss = criterion(pred, true)
 
                 total_loss.append(loss)
         total_loss = np.average(total_loss)
@@ -119,13 +133,26 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 else:
                     outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
-                if isinstance(outputs, tuple):
-                    outputs = outputs[0]
+                if self.args.model == 'TimesNetRange':
+                    mean_pred, lower_pred, upper_pred = outputs
+                    f_dim = -1 if self.args.features == 'MS' else 0
+                    batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
+                    y_mean = batch_y.mean(dim=1)
+                    y_lower = batch_y.min(dim=1).values
+                    y_upper = batch_y.max(dim=1).values
+                    loss = (
+                        criterion(mean_pred, y_mean)
+                        + criterion(lower_pred, y_lower)
+                        + criterion(upper_pred, y_upper)
+                    )
+                else:
+                    if isinstance(outputs, tuple):
+                        outputs = outputs[0]
+                    f_dim = -1 if self.args.features == 'MS' else 0
+                    outputs = outputs[:, -self.args.pred_len:, f_dim:]
+                    batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
+                    loss = criterion(outputs, batch_y)
 
-                f_dim = -1 if self.args.features == 'MS' else 0
-                outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
-                loss = criterion(outputs, batch_y)
                 train_loss.append(loss.item())
 
                 if (i + 1) % 100 == 0:
@@ -193,26 +220,49 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 else:
                     outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
-                if isinstance(outputs, tuple):
-                    outputs = outputs[0]
+                if self.args.model == 'TimesNetRange':
+                    mean_pred, lower_pred, upper_pred = outputs
+                    f_dim = -1 if self.args.features == 'MS' else 0
+                    batch_y = batch_y[:, -self.args.pred_len:, :].to(self.device)
+                    y_mean = batch_y[:, :, f_dim:].mean(dim=1)
+                    y_lower = batch_y[:, :, f_dim:].min(dim=1).values
+                    y_upper = batch_y[:, :, f_dim:].max(dim=1).values
+                    mean_pred = mean_pred.detach().cpu().numpy()
+                    lower_pred = lower_pred.detach().cpu().numpy()
+                    upper_pred = upper_pred.detach().cpu().numpy()
+                    y_mean = y_mean.detach().cpu().numpy()
+                    y_lower = y_lower.detach().cpu().numpy()
+                    y_upper = y_upper.detach().cpu().numpy()
+                    if test_data.scale and self.args.inverse:
+                        mean_pred = test_data.inverse_transform(mean_pred)
+                        lower_pred = test_data.inverse_transform(lower_pred)
+                        upper_pred = test_data.inverse_transform(upper_pred)
+                        y_mean = test_data.inverse_transform(y_mean)
+                        y_lower = test_data.inverse_transform(y_lower)
+                        y_upper = test_data.inverse_transform(y_upper)
+                    pred = mean_pred
+                    true = y_mean
+                else:
+                    if isinstance(outputs, tuple):
+                        outputs = outputs[0]
 
-                f_dim = -1 if self.args.features == 'MS' else 0
-                outputs = outputs[:, -self.args.pred_len:, :]
-                batch_y = batch_y[:, -self.args.pred_len:, :].to(self.device)
-                outputs = outputs.detach().cpu().numpy()
-                batch_y = batch_y.detach().cpu().numpy()
-                if test_data.scale and self.args.inverse:
-                    shape = batch_y.shape
-                    if outputs.shape[-1] != batch_y.shape[-1]:
-                        outputs = np.tile(outputs, [1, 1, int(batch_y.shape[-1] / outputs.shape[-1])])
-                    outputs = test_data.inverse_transform(outputs.reshape(shape[0] * shape[1], -1)).reshape(shape)
-                    batch_y = test_data.inverse_transform(batch_y.reshape(shape[0] * shape[1], -1)).reshape(shape)
+                    f_dim = -1 if self.args.features == 'MS' else 0
+                    outputs = outputs[:, -self.args.pred_len:, :]
+                    batch_y = batch_y[:, -self.args.pred_len:, :].to(self.device)
+                    outputs = outputs.detach().cpu().numpy()
+                    batch_y = batch_y.detach().cpu().numpy()
+                    if test_data.scale and self.args.inverse:
+                        shape = batch_y.shape
+                        if outputs.shape[-1] != batch_y.shape[-1]:
+                            outputs = np.tile(outputs, [1, 1, int(batch_y.shape[-1] / outputs.shape[-1])])
+                        outputs = test_data.inverse_transform(outputs.reshape(shape[0] * shape[1], -1)).reshape(shape)
+                        batch_y = test_data.inverse_transform(batch_y.reshape(shape[0] * shape[1], -1)).reshape(shape)
 
-                outputs = outputs[:, :, f_dim:]
-                batch_y = batch_y[:, :, f_dim:]
+                    outputs = outputs[:, :, f_dim:]
+                    batch_y = batch_y[:, :, f_dim:]
 
-                pred = outputs
-                true = batch_y
+                    pred = outputs
+                    true = batch_y
 
                 preds.append(pred)
                 trues.append(true)
@@ -228,17 +278,22 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         preds = np.concatenate(preds, axis=0)
         trues = np.concatenate(trues, axis=0)
         print('test shape:', preds.shape, trues.shape)
-        preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
-        trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
-        print('test shape:', preds.shape, trues.shape)
+        if preds.ndim == 3:
+            preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
+            trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
+            print('test shape:', preds.shape, trues.shape)
+        else:
+            preds = preds.reshape(-1, preds.shape[-1])
+            trues = trues.reshape(-1, trues.shape[-1])
+            print('aggregated shape:', preds.shape, trues.shape)
 
         # result save
         folder_path = './results/' + setting + '/'
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
 
-        # dtw calculation
-        if self.args.use_dtw:
+        # dtw calculation only for sequence outputs
+        if self.args.use_dtw and preds.ndim == 3:
             dtw_list = []
             manhattan_distance = lambda x, y: np.abs(x - y)
             for i in range(preds.shape[0]):

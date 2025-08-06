@@ -85,25 +85,45 @@ class Model(nn.Module):
         self.interval_mult = getattr(configs, 'interval_mult', 2.0)
 
         self.baseline = DLinearBlock(configs)
-        self.enc_embedding = DataEmbedding(configs.enc_in, configs.d_model, configs.embed, configs.freq, configs.dropout)
+        self.enc_embedding = DataEmbedding(
+            configs.enc_in, configs.d_model, configs.embed, configs.freq, configs.dropout
+        )
+        # project encoder output to include the prediction horizon so the
+        # lightweight TimesBlocks can operate on both history and future
+        self.predict_linear = nn.Linear(self.seq_len, self.seq_len + self.pred_len)
         self.layers = nn.ModuleList([TimesBlockLite(configs) for _ in range(configs.e_layers)])
         self.layer_norm = nn.LayerNorm(configs.d_model)
         self.mean_projection = nn.Linear(configs.d_model, configs.c_out, bias=True)
         self.var_projection = nn.Linear(configs.d_model, configs.c_out, bias=True)
 
     def forward(self, x_enc, x_mark_enc, x_dec=None, x_mark_dec=None):
+        # DLinear baseline provides a coarse forecast over the prediction horizon
         baseline = self.baseline(x_enc)
+
+        # encode historical sequence and extend to cover the prediction horizon
         enc_out = self.enc_embedding(x_enc, x_mark_enc)
+        enc_out = self.predict_linear(enc_out.permute(0, 2, 1)).permute(0, 2, 1)
+
+        # lightweight residual modeling
         for block in self.layers:
             enc_out = self.layer_norm(block(enc_out))
+
         mean_residual = self.mean_projection(enc_out)
         log_var = self.var_projection(enc_out)
-        mean = baseline + mean_residual
-        std = torch.sqrt(F.softplus(log_var) + 1e-6)
+
+        # combine baseline with residual on the prediction window only
+        mean = baseline + mean_residual[:, -self.pred_len:, :]
+        std = torch.sqrt(F.softplus(log_var[:, -self.pred_len:, :]) + 1e-6)
         lower = mean - self.interval_mult * std
         upper = mean + self.interval_mult * std
 
+        # aggregate statistics over the whole prediction range instead of
+        # returning point-wise forecasts
+        mean_agg = mean.mean(dim=1)
+        lower_agg = lower.min(dim=1).values
+        upper_agg = upper.max(dim=1).values
+
         if self.task_name in ['long_term_forecast', 'short_term_forecast']:
-            return mean[:, -self.pred_len:, :], lower[:, -self.pred_len:, :], upper[:, -self.pred_len:, :]
+            return mean_agg, lower_agg, upper_agg
         else:
-            return mean[:, -self.pred_len:, :]
+            return mean_agg
