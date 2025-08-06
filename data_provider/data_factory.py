@@ -72,19 +72,28 @@ def data_provider(args, flag):
                                  'state_condition': args.state_condition})
         if args.data == 'sqlitefolder':
             extra_kwargs.update({'table_name': args.table_name})
-        data_set = Data(
-            args = args,
-            root_path=args.root_path,
-            data_path=args.data_path,
-            flag=flag,
-            size=[args.seq_len, args.label_len, args.pred_len],
-            features=args.features,
-            target=args.target,
-            timeenc=timeenc,
-            freq=freq,
-            seasonal_patterns=args.seasonal_patterns,
+
+        data_kwargs = {
+            'args': args,
+            'root_path': args.root_path,
+            'flag': flag,
+            'size': [args.seq_len, args.label_len, args.pred_len],
+            'features': args.features,
+            'target': args.target,
+            'timeenc': timeenc,
+            'freq': freq,
+            'seasonal_patterns': args.seasonal_patterns,
             **extra_kwargs
-        )
+        }
+        # ``csvfolder`` and ``sqlitefolder`` datasets load all files from the
+        # root path and therefore do not expect ``data_path``.  Passing it
+        # triggers ``TypeError: __init__() got an unexpected keyword
+        # argument 'data_path'``.  Only include ``data_path`` for datasets that
+        # require a specific file.
+        if args.data not in ['csvfolder', 'sqlitefolder']:
+            data_kwargs['data_path'] = args.data_path
+
+        data_set = Data(**data_kwargs)
         print(flag, len(data_set))
         data_loader = DataLoader(
             data_set,
