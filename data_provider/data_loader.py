@@ -323,7 +323,7 @@ class Dataset_CSVFolder(Dataset):
 
     def __init__(self, args, root_path, flag='train', size=None,
                  features='S', target='value', scale=True, timeenc=0, freq='h',
-                 state='all', state_column='state', speed_column='speed',
+                 seasonal_patterns=None, state='all', state_column='state', speed_column='speed',
                  speed_threshold=0.1, state_condition=None):
         self.args = args
         if size is None:
@@ -474,7 +474,7 @@ class Dataset_SQLiteFolder(Dataset):
 
     def __init__(self, args, root_path, flag='train', size=None,
                  features='S', target='value', scale=True, timeenc=0, freq='h',
-                 table_name=None, state='all', state_column='state',
+                 seasonal_patterns=None, table_name=None, state='all', state_column='state',
                  speed_column='speed', speed_threshold=0.1,
                  state_condition=None):
         if table_name is None:
