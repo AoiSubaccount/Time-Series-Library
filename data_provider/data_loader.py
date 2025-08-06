@@ -363,7 +363,22 @@ class Dataset_CSVFolder(Dataset):
             df = pd.read_csv(f)
             if 'timestamp' not in df.columns:
                 raise ValueError('timestamp column required in %s' % f)
-            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            ts = df['timestamp']
+            # ``pandas.to_datetime`` assumes nanosecond precision for
+            # integers which breaks when the timestamp is stored as Unix
+            # milliseconds or seconds.  Heuristically detect the unit based
+            # on the magnitude so that datasets using epoch integers load
+            # correctly.
+            if np.issubdtype(ts.dtype, np.number):
+                if ts.max() > 1e12:
+                    unit = 'ms'
+                elif ts.max() > 1e9:
+                    unit = 's'
+                else:
+                    unit = 'ns'
+                df['timestamp'] = pd.to_datetime(ts, unit=unit)
+            else:
+                df['timestamp'] = pd.to_datetime(ts)
             if self.state != 'all':
                 if self.state_condition is not None:
                     mask = df.eval(self.state_condition)
