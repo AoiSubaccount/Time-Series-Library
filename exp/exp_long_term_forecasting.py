@@ -198,6 +198,10 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
         preds = []
         trues = []
+        # store statistics separately when model outputs range predictions
+        range_mean_preds, range_mean_trues = [], []
+        range_min_preds, range_min_trues = [], []
+        range_max_preds, range_max_trues = [], []
         folder_path = './test_results/' + setting + '/'
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
@@ -227,12 +231,15 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     y_mean = batch_y[:, :, f_dim:].mean(dim=1)
                     y_lower = batch_y[:, :, f_dim:].min(dim=1).values
                     y_upper = batch_y[:, :, f_dim:].max(dim=1).values
+
+                    # convert to numpy
                     mean_pred = mean_pred.detach().cpu().numpy()
                     lower_pred = lower_pred.detach().cpu().numpy()
                     upper_pred = upper_pred.detach().cpu().numpy()
                     y_mean = y_mean.detach().cpu().numpy()
                     y_lower = y_lower.detach().cpu().numpy()
                     y_upper = y_upper.detach().cpu().numpy()
+
                     if test_data.scale and self.args.inverse:
                         mean_pred = test_data.inverse_transform(mean_pred)
                         lower_pred = test_data.inverse_transform(lower_pred)
@@ -240,6 +247,15 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         y_mean = test_data.inverse_transform(y_mean)
                         y_lower = test_data.inverse_transform(y_lower)
                         y_upper = test_data.inverse_transform(y_upper)
+
+                    # store mean/min/max for later evaluation
+                    range_mean_preds.append(mean_pred)
+                    range_mean_trues.append(y_mean)
+                    range_min_preds.append(lower_pred)
+                    range_min_trues.append(y_lower)
+                    range_max_preds.append(upper_pred)
+                    range_max_trues.append(y_upper)
+
                     pred = mean_pred
                     true = y_mean
                 else:
@@ -264,8 +280,9 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     pred = outputs
                     true = batch_y
 
-                preds.append(pred)
-                trues.append(true)
+                if self.args.model != 'TimesNetRange':
+                    preds.append(pred)
+                    trues.append(true)
                 if i % 20 == 0:
                     input = batch_x.detach().cpu().numpy()
                     if test_data.scale and self.args.inverse:
@@ -279,49 +296,88 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         pd = np.concatenate((input[:, -1], pred[:, -1]), axis=0)
                     visual(gt, pd, os.path.join(folder_path, str(i) + '.pdf'))
 
-        preds = np.concatenate(preds, axis=0)
-        trues = np.concatenate(trues, axis=0)
-        print('test shape:', preds.shape, trues.shape)
-        if preds.ndim == 3:
-            preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
-            trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
+        if self.args.model == 'TimesNetRange':
+            mean_preds = np.concatenate(range_mean_preds, axis=0)
+            mean_trues = np.concatenate(range_mean_trues, axis=0)
+            min_preds = np.concatenate(range_min_preds, axis=0)
+            min_trues = np.concatenate(range_min_trues, axis=0)
+            max_preds = np.concatenate(range_max_preds, axis=0)
+            max_trues = np.concatenate(range_max_trues, axis=0)
+
+            folder_path = './results/' + setting + '/'
+            if not os.path.exists(folder_path):
+                os.makedirs(folder_path)
+
+            mean_metrics = metric(mean_preds, mean_trues)
+            min_metrics = metric(min_preds, min_trues)
+            max_metrics = metric(max_preds, max_trues)
+
+            print('mean mse:{}, mae:{}'.format(mean_metrics[1], mean_metrics[0]))
+            print('min mse:{}, mae:{}'.format(min_metrics[1], min_metrics[0]))
+            print('max mse:{}, mae:{}'.format(max_metrics[1], max_metrics[0]))
+
+            with open("result_long_term_forecast.txt", 'a') as f:
+                f.write(setting + "  \n")
+                f.write('mean mse:{}, mae:{}\n'.format(mean_metrics[1], mean_metrics[0]))
+                f.write('min mse:{}, mae:{}\n'.format(min_metrics[1], min_metrics[0]))
+                f.write('max mse:{}, mae:{}\n'.format(max_metrics[1], max_metrics[0]))
+                f.write('\n')
+
+            np.save(folder_path + 'mean_metrics.npy', np.array(mean_metrics))
+            np.save(folder_path + 'min_metrics.npy', np.array(min_metrics))
+            np.save(folder_path + 'max_metrics.npy', np.array(max_metrics))
+            np.save(folder_path + 'pred_mean.npy', mean_preds)
+            np.save(folder_path + 'true_mean.npy', mean_trues)
+            np.save(folder_path + 'pred_min.npy', min_preds)
+            np.save(folder_path + 'true_min.npy', min_trues)
+            np.save(folder_path + 'pred_max.npy', max_preds)
+            np.save(folder_path + 'true_max.npy', max_trues)
+
+            return
+        else:
+            preds = np.concatenate(preds, axis=0)
+            trues = np.concatenate(trues, axis=0)
             print('test shape:', preds.shape, trues.shape)
-        else:
-            preds = preds.reshape(-1, preds.shape[-1])
-            trues = trues.reshape(-1, trues.shape[-1])
-            print('aggregated shape:', preds.shape, trues.shape)
+            if preds.ndim == 3:
+                preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
+                trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
+                print('test shape:', preds.shape, trues.shape)
+            else:
+                preds = preds.reshape(-1, preds.shape[-1])
+                trues = trues.reshape(-1, trues.shape[-1])
+                print('aggregated shape:', preds.shape, trues.shape)
 
-        # result save
-        folder_path = './results/' + setting + '/'
-        if not os.path.exists(folder_path):
-            os.makedirs(folder_path)
+            # result save
+            folder_path = './results/' + setting + '/'
+            if not os.path.exists(folder_path):
+                os.makedirs(folder_path)
 
-        # dtw calculation only for sequence outputs
-        if self.args.use_dtw and preds.ndim == 3:
-            dtw_list = []
-            manhattan_distance = lambda x, y: np.abs(x - y)
-            for i in range(preds.shape[0]):
-                x = preds[i].reshape(-1, 1)
-                y = trues[i].reshape(-1, 1)
-                if i % 100 == 0:
-                    print("calculating dtw iter:", i)
-                d, _, _, _ = accelerated_dtw(x, y, dist=manhattan_distance)
-                dtw_list.append(d)
-            dtw = np.array(dtw_list).mean()
-        else:
-            dtw = 'Not calculated'
+            # dtw calculation only for sequence outputs
+            if self.args.use_dtw and preds.ndim == 3:
+                dtw_list = []
+                manhattan_distance = lambda x, y: np.abs(x - y)
+                for i in range(preds.shape[0]):
+                    x = preds[i].reshape(-1, 1)
+                    y = trues[i].reshape(-1, 1)
+                    if i % 100 == 0:
+                        print("calculating dtw iter:", i)
+                    d, _, _, _ = accelerated_dtw(x, y, dist=manhattan_distance)
+                    dtw_list.append(d)
+                dtw = np.array(dtw_list).mean()
+            else:
+                dtw = 'Not calculated'
 
-        mae, mse, rmse, mape, mspe = metric(preds, trues)
-        print('mse:{}, mae:{}, dtw:{}'.format(mse, mae, dtw))
-        f = open("result_long_term_forecast.txt", 'a')
-        f.write(setting + "  \n")
-        f.write('mse:{}, mae:{}, dtw:{}'.format(mse, mae, dtw))
-        f.write('\n')
-        f.write('\n')
-        f.close()
+            mae, mse, rmse, mape, mspe = metric(preds, trues)
+            print('mse:{}, mae:{}, dtw:{}'.format(mse, mae, dtw))
+            f = open("result_long_term_forecast.txt", 'a')
+            f.write(setting + "  \n")
+            f.write('mse:{}, mae:{}, dtw:{}'.format(mse, mae, dtw))
+            f.write('\n')
+            f.write('\n')
+            f.close()
 
-        np.save(folder_path + 'metrics.npy', np.array([mae, mse, rmse, mape, mspe]))
-        np.save(folder_path + 'pred.npy', preds)
-        np.save(folder_path + 'true.npy', trues)
+            np.save(folder_path + 'metrics.npy', np.array([mae, mse, rmse, mape, mspe]))
+            np.save(folder_path + 'pred.npy', preds)
+            np.save(folder_path + 'true.npy', trues)
 
-        return
+            return
