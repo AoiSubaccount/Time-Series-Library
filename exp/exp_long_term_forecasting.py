@@ -288,13 +288,26 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     if test_data.scale and self.args.inverse:
                         shape = input.shape
                         input = test_data.inverse_transform(input.reshape(shape[0] * shape[1], -1)).reshape(shape)
+
                     if input.ndim == 3 and true.ndim == 3 and pred.ndim == 3:
                         gt = np.concatenate((input[0, :, -1], true[0, :, -1]), axis=0)
                         pd = np.concatenate((input[0, :, -1], pred[0, :, -1]), axis=0)
                     else:
-                        gt = np.concatenate((input[:, -1], true[:, -1]), axis=0)
-                        pd = np.concatenate((input[:, -1], pred[:, -1]), axis=0)
-                    visual(gt, pd, os.path.join(folder_path, str(i) + '.pdf'))
+                        # When prediction/true tensors are reduced (e.g. TimesNetRange)
+                        # their dimensionality may not match ``input``.  Flatten all
+                        # arrays to 1D before concatenation to avoid shape errors.
+                        last_input = input[:, -1] if input.ndim > 1 else input
+                        last_true = true[:, -1] if true.ndim > 1 else true
+                        last_pred = pred[:, -1] if pred.ndim > 1 else pred
+                        gt = np.concatenate((last_input.reshape(-1), last_true.reshape(-1)), axis=0)
+                        pd = np.concatenate((last_input.reshape(-1), last_pred.reshape(-1)), axis=0)
+
+                    # ``TimesNetRange`` produces aggregate statistics rather than
+                    # full sequences.  Visualizing them alongside the raw input is
+                    # not meaningful and previously caused a crash.  Skip plotting
+                    # when using this model.
+                    if self.args.model != 'TimesNetRange':
+                        visual(gt, pd, os.path.join(folder_path, str(i) + '.pdf'))
 
         if self.args.model == 'TimesNetRange':
             mean_preds = np.concatenate(range_mean_preds, axis=0)
