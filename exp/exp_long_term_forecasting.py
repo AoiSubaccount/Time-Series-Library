@@ -37,6 +37,26 @@ class Exp_Long_Term_Forecast(Exp_Basic):
     def _select_criterion(self):
         criterion = nn.MSELoss()
         return criterion
+
+    def _split_timesnetrange_outputs(self, outputs):
+        """Extract mean/lower/upper tensors from TimesNetRange output.
+
+        ``TimesNetRange`` may return either a tuple of three tensors or a
+        single stacked tensor whose first or second dimension indexes the
+        statistics.  This helper normalises the output format so the rest of
+        the training/validation/test code can assume three separate tensors.
+        """
+
+        if isinstance(outputs, (list, tuple)):
+            # Already a sequence of tensors – return the first three values.
+            return outputs[0], outputs[1], outputs[2]
+
+        # When ``outputs`` is a tensor we expect the statistics dimension to
+        # be either the first or second axis.  Handle both layouts.
+        if outputs.ndim > 1 and outputs.shape[0] == 3:
+            return outputs[0], outputs[1], outputs[2]
+
+        return outputs[:, 0], outputs[:, 1], outputs[:, 2]
  
 
     def vali(self, vali_data, vali_loader, criterion):
@@ -60,7 +80,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 else:
                     outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 if self.args.model == 'TimesNetRange':
-                    mean_pred, lower_pred, upper_pred = outputs
+                    mean_pred, lower_pred, upper_pred = self._split_timesnetrange_outputs(outputs)
                     f_dim = -1 if self.args.features == 'MS' else 0
                     batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
                     y_mean = batch_y.mean(dim=1)
@@ -134,7 +154,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 else:
                     outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 if self.args.model == 'TimesNetRange':
-                    mean_pred, lower_pred, upper_pred = outputs
+                    mean_pred, lower_pred, upper_pred = self._split_timesnetrange_outputs(outputs)
                     f_dim = -1 if self.args.features == 'MS' else 0
                     batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
                     y_mean = batch_y.mean(dim=1)
@@ -225,7 +245,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 else:
                     outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 if self.args.model == 'TimesNetRange':
-                    mean_pred, lower_pred, upper_pred = outputs
+                    mean_pred, lower_pred, upper_pred = self._split_timesnetrange_outputs(outputs)
                     f_dim = -1 if self.args.features == 'MS' else 0
                     batch_y = batch_y[:, -self.args.pred_len:, :].to(self.device)
                     y_mean = batch_y[:, :, f_dim:].mean(dim=1)
