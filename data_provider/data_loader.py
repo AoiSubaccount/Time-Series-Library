@@ -17,6 +17,49 @@ from utils.augmentation import run_augmentation_single
 warnings.filterwarnings('ignore')
 
 
+class ManualMinMaxScaler:
+    """A minimal scaler using provided value ranges.
+
+    Parameters
+    ----------
+    min_vals, max_vals : array_like
+        Minimum and maximum values for each feature. Scalars are broadcast.
+    """
+
+    def __init__(self, min_vals, max_vals):
+        self.min = np.array(min_vals)
+        self.max = np.array(max_vals)
+
+    def fit(self, data):
+        # Compatibility with sklearn interface; nothing to do
+        return self
+
+    def transform(self, data):
+        return (data - self.min) / (self.max - self.min)
+
+    def inverse_transform(self, data):
+        return data * (self.max - self.min) + self.min
+
+
+def _build_scaler(args, train_data):
+    """Create a scaler based on command line arguments.
+
+    If ``scale_min`` and ``scale_max`` are provided, a ManualMinMaxScaler is
+    used. Otherwise a StandardScaler fitted on ``train_data`` is returned.
+    """
+    scale_min = getattr(args, 'scale_min', None)
+    scale_max = getattr(args, 'scale_max', None)
+    if scale_min is not None and scale_max is not None:
+        if np.isscalar(scale_min):
+            scale_min = [scale_min]
+        if np.isscalar(scale_max):
+            scale_max = [scale_max]
+        return ManualMinMaxScaler(scale_min, scale_max)
+    scaler = StandardScaler()
+    scaler.fit(train_data)
+    return scaler
+
+
 class Dataset_ETT_hour(Dataset):
     def __init__(self, args, root_path, flag='train', size=None,
                  features='S', data_path='ETTh1.csv',
@@ -48,7 +91,6 @@ class Dataset_ETT_hour(Dataset):
         self.__read_data__()
 
     def __read_data__(self):
-        self.scaler = StandardScaler()
         df_raw = pd.read_csv(os.path.join(self.root_path,
                                           self.data_path))
 
@@ -65,9 +107,10 @@ class Dataset_ETT_hour(Dataset):
 
         if self.scale:
             train_data = df_data[border1s[0]:border2s[0]]
-            self.scaler.fit(train_data.values)
+            self.scaler = _build_scaler(self.args, train_data.values)
             data = self.scaler.transform(df_data.values)
         else:
+            self.scaler = None
             data = df_data.values
 
         df_stamp = df_raw[['date']][border1:border2]
@@ -107,6 +150,8 @@ class Dataset_ETT_hour(Dataset):
         return len(self.data_x) - self.seq_len - self.pred_len + 1
 
     def inverse_transform(self, data):
+        if self.scaler is None:
+            return data
         return self.scaler.inverse_transform(data)
 
 
@@ -141,7 +186,6 @@ class Dataset_ETT_minute(Dataset):
         self.__read_data__()
 
     def __read_data__(self):
-        self.scaler = StandardScaler()
         df_raw = pd.read_csv(os.path.join(self.root_path,
                                           self.data_path))
 
@@ -158,9 +202,10 @@ class Dataset_ETT_minute(Dataset):
 
         if self.scale:
             train_data = df_data[border1s[0]:border2s[0]]
-            self.scaler.fit(train_data.values)
+            self.scaler = _build_scaler(self.args, train_data.values)
             data = self.scaler.transform(df_data.values)
         else:
+            self.scaler = None
             data = df_data.values
 
         df_stamp = df_raw[['date']][border1:border2]
@@ -202,6 +247,8 @@ class Dataset_ETT_minute(Dataset):
         return len(self.data_x) - self.seq_len - self.pred_len + 1
 
     def inverse_transform(self, data):
+        if self.scaler is None:
+            return data
         return self.scaler.inverse_transform(data)
 
 
@@ -236,7 +283,6 @@ class Dataset_Custom(Dataset):
         self.__read_data__()
 
     def __read_data__(self):
-        self.scaler = StandardScaler()
         df_raw = pd.read_csv(os.path.join(self.root_path,
                                           self.data_path))
 
@@ -263,9 +309,10 @@ class Dataset_Custom(Dataset):
 
         if self.scale:
             train_data = df_data[border1s[0]:border2s[0]]
-            self.scaler.fit(train_data.values)
+            self.scaler = _build_scaler(self.args, train_data.values)
             data = self.scaler.transform(df_data.values)
         else:
+            self.scaler = None
             data = df_data.values
 
         df_stamp = df_raw[['date']][border1:border2]
@@ -305,6 +352,8 @@ class Dataset_Custom(Dataset):
         return len(self.data_x) - self.seq_len - self.pred_len + 1
 
     def inverse_transform(self, data):
+        if self.scaler is None:
+            return data
         return self.scaler.inverse_transform(data)
 
 
@@ -403,7 +452,6 @@ class Dataset_CSVFolder(Dataset):
         return data
 
     def __read_data__(self):
-        self.scaler = StandardScaler()
         df_raw = self._load_folder()
 
         cols = list(df_raw.columns)
@@ -427,9 +475,10 @@ class Dataset_CSVFolder(Dataset):
 
         if self.scale:
             train_data = df_data[border1s[0]:border2s[0]]
-            self.scaler.fit(train_data.values)
+            self.scaler = _build_scaler(self.args, train_data.values)
             data = self.scaler.transform(df_data.values)
         else:
+            self.scaler = None
             data = df_data.values
 
         df_stamp = df_raw[['timestamp']][border1:border2]
@@ -469,6 +518,8 @@ class Dataset_CSVFolder(Dataset):
         return len(self.data_x) - self.seq_len - self.pred_len + 1
 
     def inverse_transform(self, data):
+        if self.scaler is None:
+            return data
         return self.scaler.inverse_transform(data)
 
 
@@ -556,7 +607,6 @@ class Dataset_SQLiteFolder(Dataset):
         return data
 
     def __read_data__(self):
-        self.scaler = StandardScaler()
         df_raw = self._load_folder()
 
         cols = list(df_raw.columns)
@@ -580,9 +630,10 @@ class Dataset_SQLiteFolder(Dataset):
 
         if self.scale:
             train_data = df_data[border1s[0]:border2s[0]]
-            self.scaler.fit(train_data.values)
+            self.scaler = _build_scaler(self.args, train_data.values)
             data = self.scaler.transform(df_data.values)
         else:
+            self.scaler = None
             data = df_data.values
 
         df_stamp = df_raw[['timestamp']][border1:border2]
@@ -622,6 +673,8 @@ class Dataset_SQLiteFolder(Dataset):
         return len(self.data_x) - self.seq_len - self.pred_len + 1
 
     def inverse_transform(self, data):
+        if self.scaler is None:
+            return data
         return self.scaler.inverse_transform(data)
 
 
@@ -686,6 +739,8 @@ class Dataset_M4(Dataset):
         return len(self.timeseries)
 
     def inverse_transform(self, data):
+        if self.scaler is None:
+            return data
         return self.scaler.inverse_transform(data)
 
     def last_insample_window(self):
