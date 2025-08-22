@@ -44,6 +44,12 @@ if __name__ == '__main__':
                         help='table name for sqlitefolder dataset')
     parser.add_argument('--checkpoints', type=str, default='./checkpoints/', help='location of model checkpoints')
 
+    # normalization
+    parser.add_argument('--scale_min', type=float, nargs='+', default=None,
+                        help='Minimum value(s) for manual min-max scaling')
+    parser.add_argument('--scale_max', type=float, nargs='+', default=None,
+                        help='Maximum value(s) for manual min-max scaling')
+
     # forecasting task
     parser.add_argument('--seq_len', type=int, default=96, help='input sequence length')
     parser.add_argument('--label_len', type=int, default=48, help='start token length')

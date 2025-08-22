@@ -37,6 +37,26 @@ class Exp_Long_Term_Forecast(Exp_Basic):
     def _select_criterion(self):
         criterion = nn.MSELoss()
         return criterion
+
+    def _split_timesnetrange_outputs(self, outputs):
+        """Extract mean/lower/upper tensors from TimesNetRange output.
+
+        ``TimesNetRange`` may return either a tuple of three tensors or a
+        single stacked tensor whose first or second dimension indexes the
+        statistics.  This helper normalises the output format so the rest of
+        the training/validation/test code can assume three separate tensors.
+        """
+
+        if isinstance(outputs, (list, tuple)):
+            # Already a sequence of tensors – return the first three values.
+            return outputs[0], outputs[1], outputs[2]
+
+        # When ``outputs`` is a tensor we expect the statistics dimension to
+        # be either the first or second axis.  Handle both layouts.
+        if outputs.ndim > 1 and outputs.shape[0] == 3:
+            return outputs[0], outputs[1], outputs[2]
+
+        return outputs[:, 0], outputs[:, 1], outputs[:, 2]
  
 
     def vali(self, vali_data, vali_loader, criterion):
@@ -60,7 +80,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 else:
                     outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 if self.args.model == 'TimesNetRange':
-                    mean_pred, lower_pred, upper_pred = outputs
+                    mean_pred, lower_pred, upper_pred = self._split_timesnetrange_outputs(outputs)
                     f_dim = -1 if self.args.features == 'MS' else 0
                     batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
                     y_mean = batch_y.mean(dim=1)
@@ -134,7 +154,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 else:
                     outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 if self.args.model == 'TimesNetRange':
-                    mean_pred, lower_pred, upper_pred = outputs
+                    mean_pred, lower_pred, upper_pred = self._split_timesnetrange_outputs(outputs)
                     f_dim = -1 if self.args.features == 'MS' else 0
                     batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
                     y_mean = batch_y.mean(dim=1)
@@ -225,7 +245,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 else:
                     outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 if self.args.model == 'TimesNetRange':
-                    mean_pred, lower_pred, upper_pred = outputs
+                    mean_pred, lower_pred, upper_pred = self._split_timesnetrange_outputs(outputs)
                     f_dim = -1 if self.args.features == 'MS' else 0
                     batch_y = batch_y[:, -self.args.pred_len:, :].to(self.device)
                     y_mean = batch_y[:, :, f_dim:].mean(dim=1)
@@ -288,13 +308,26 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     if test_data.scale and self.args.inverse:
                         shape = input.shape
                         input = test_data.inverse_transform(input.reshape(shape[0] * shape[1], -1)).reshape(shape)
+
                     if input.ndim == 3 and true.ndim == 3 and pred.ndim == 3:
                         gt = np.concatenate((input[0, :, -1], true[0, :, -1]), axis=0)
                         pd = np.concatenate((input[0, :, -1], pred[0, :, -1]), axis=0)
                     else:
-                        gt = np.concatenate((input[:, -1], true[:, -1]), axis=0)
-                        pd = np.concatenate((input[:, -1], pred[:, -1]), axis=0)
-                    visual(gt, pd, os.path.join(folder_path, str(i) + '.pdf'))
+                        # When prediction/true tensors are reduced (e.g. TimesNetRange)
+                        # their dimensionality may not match ``input``.  Flatten all
+                        # arrays to 1D before concatenation to avoid shape errors.
+                        last_input = input[:, -1] if input.ndim > 1 else input
+                        last_true = true[:, -1] if true.ndim > 1 else true
+                        last_pred = pred[:, -1] if pred.ndim > 1 else pred
+                        gt = np.concatenate((last_input.reshape(-1), last_true.reshape(-1)), axis=0)
+                        pd = np.concatenate((last_input.reshape(-1), last_pred.reshape(-1)), axis=0)
+
+                    # ``TimesNetRange`` produces aggregate statistics rather than
+                    # full sequences.  Visualizing them alongside the raw input is
+                    # not meaningful and previously caused a crash.  Skip plotting
+                    # when using this model.
+                    if self.args.model != 'TimesNetRange':
+                        visual(gt, pd, os.path.join(folder_path, str(i) + '.pdf'))
 
         if self.args.model == 'TimesNetRange':
             mean_preds = np.concatenate(range_mean_preds, axis=0)
